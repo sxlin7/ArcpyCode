@@ -1,3 +1,4 @@
+```
 library(plyr)
 
 toys <-c('Psyduck','Pikachu','Pikachu Car')
@@ -36,3 +37,4 @@ sdopen<-var(open)^.5
 sdopen
 
 #mean meals is 5.4, so 6 meals for three toys
+```

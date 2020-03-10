@@ -1,0 +1,184 @@
+##JSON to MAP##
+
+
+### Choose your JSON file
+JSON_path = file.choose() 
+
+### type the location of where you want the file saved. Include the name you want the file as. include the extension .csv
+save_folder = choose.dir() # 
+save_name <- "name.csv"
+
+####
+setwd(save_folder)
+
+library(jsonlite)
+library(dplyr)
+library(plyr)
+
+####  
+dat <- fromJSON(JSON_path, simplifyDataFrame = TRUE)
+
+lat <- NULL
+lon <- NULL
+start_time <- NULL
+end_time <- NULL
+start_time_store <- NULL
+end_time_store <- NULL
+type <- NULL
+activity <- NULL
+activity_store <- NULL
+
+for (i in 1:length(dat$timelineObjects$activitySegment$waypointPath$waypoints)) {
+  if (is.na(dat$timelineObjects$activitySegment$startLocation$longitude[i]))
+    next
+  
+  length <- length(dat$timelineObjects$activitySegment$waypointPath$waypoints[[i]]$latE7)
+  start_time_store <- dat$timelineObjects$activitySegment$duration$startTimestampMs[i]
+  end_time_store <- dat$timelineObjects$activitySegment$duration$endTimestampMs[i]
+  activity_store <- dat$timelineObjects$activitySegment$activityType[i]
+  
+  lon <- rbind(lon, dat$timelineObjects$activitySegment$startLocation$longitudeE7[i])
+  lat <- rbind(lat, dat$timelineObjects$activitySegment$startLocation$latitudeE7[i])
+  activity <- rbind(activity, activity_store)
+  start_time <- rbind(start_time,start_time_store)
+  end_time <- rbind(end_time,end_time_store)
+  type <- rbind(type, 1)
+  
+  for (j in 1:length(dat$timelineObjects$activitySegment$waypointPath$waypoints[[1]]$latE7)) {
+    
+    if (length(dat$timelineObjects$activitySegment$waypointPath$waypoints[[i]]$latE7[j]) == 0 )
+      next
+    
+    lat_store_wp <- dat$timelineObjects$activitySegment$waypointPath$waypoints[[i]]$latE7[j]
+    lon_store_wp <- dat$timelineObjects$activitySegment$waypointPath$waypoints[[i]]$lngE7[j]
+    
+    lat <- rbind(lat, lat_store_wp)
+    lon <- rbind(lon, lon_store_wp)
+    
+    start_time <- rbind(start_time,start_time_store)
+    end_time <- rbind(end_time,end_time_store)
+    activity <- rbind(activity, activity_store)
+    type <- rbind(type, 2)
+    lat_store_wp <- NULL
+    lon_store_wp <- NULL
+  }
+  
+  lon <- rbind(lon, dat$timelineObjects$activitySegment$endLocation$longitudeE7[i])
+  lat <- rbind(lat, dat$timelineObjects$activitySegment$endLocation$latitudeE7[i])
+  activity <- rbind(activity, activity_store)
+  start_time <- rbind(start_time,start_time_store)
+  end_time <- rbind(end_time,end_time_store)
+  type <- rbind(type, 3)
+  
+  activity_store <- NULL
+  start_time_store <- NULL
+  end_time_store <- NULL
+  lat_store <- NULL
+  lon_store <- NULL
+  
+}
+
+df <- data.frame(
+  type = type,
+  lon = lon,
+  lat = lat,
+  start_time = start_time,
+  end_time = end_time,
+  activity = activity
+) %>% #dplyer
+  mutate(
+    lat  = lat / 10^7,
+    lon  = lon / 10^7,
+    start_time = as.POSIXct(as.numeric(as.character(start_time))/1000, tmz = "EST", origin = "1970-01-01"),
+    end_time  = as.POSIXct(as.numeric(as.character(end_time))/1000, tmz = "EST", origin = "1970-01-01"),
+  ) %>%
+  mutate(
+    start_time2 = as.character(start_time)
+  )
+
+write.csv(df, save_name, row.names = TRUE)
+
+########  Leaflet  ###############
+
+#################### Plotting Points ###########################
+
+library(leaflet)
+library(dplyr)
+library(plyr)
+
+
+getColor <- function(df, t) {
+  sapply(t, function(ty) {
+    if(ty <= 1) {
+      "green"
+    } else if(ty <= 2) {
+      "orange"
+    } else {
+      "red"
+    } })
+}
+
+getIcon <- function(df, t) {
+  sapply(t, function(ty) {
+    if(ty <= 1) {
+      "play"
+    } else if(ty <= 2) {
+      "android-walk"
+    } else {
+      "stop"
+    } })
+}
+
+icons <- awesomeIcons(
+  icon = getIcon(df, df$type) ,
+  iconColor = 'black',
+  library = 'ion',
+  markerColor = getColor(df, df$type),
+  
+)
+
+popup_marker <- paste(sep = "<br/>",
+                      "Start Time: ", df$start_time, 
+                      "End Time: ", df$end_time,
+                      "Likely Activity: ", df$activity)
+
+label_marker <- paste(sep = "",
+                      "Start Time: ", df$start_time)
+
+m <- 
+  df %>% 
+  leaflet() %>%
+  addProviderTiles(providers$OpenStreetMap.Mapnik,
+                   options = providerTileOptions(maxZoom = 200)) %>% # Add default Open Street Map tiles
+  addAwesomeMarkers( lng = ~lon,  lat = ~lat, icon = icons, popup = popup_marker,label = label_marker, group = ~start_time2 ) 
+
+start_time_list <- as.character(count(df$start_time2)[,1])
+
+popup_line <- function (dfs_st, dfs_et, dfs_a) {paste(sep = "<br/>",
+                                                      "Start Time: ", dfs_st, 
+                                                      "End Time: ", dfs_et,
+                                                      "Likely Activity: ", dfs_a)}
+
+label_line <- function (dfs_st) {paste(sep = "",
+                                       "Start Time: ", dfs_st)}
+
+for (i in 1:length(start_time_list)) {
+  df_store <- 
+    df %>% 
+    dplyr::filter(start_time2 == start_time_list[i])
+  m <- addPolylines(m, df_store$lon, df_store$lat, group = df_store$start_time2, 
+                    opacity = 0.1,
+                    label = label_line(df_store$start_time),
+                    popup = popup_line(df_store$start_time,df_store$end_time, df_store$activity),
+                    highlightOptions = highlightOptions(color = "#0bfda3", opacity = .5) )}
+
+legend <- df$start_time2
+
+m <- 
+  addLayersControl(m,
+                   overlayGroups = df$start_time2,
+                   options = layersControlOptions(collapsed = FALSE)
+  ) %>% 
+  hideGroup(legend)
+m
+

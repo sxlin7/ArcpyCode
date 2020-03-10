@@ -1,0 +1,509 @@
+/*Main Code:*/
+
+/*Reading in Sons and Daughters*/
+proc import out=son1 datafile='N:\Stat Programming\Sim Project\names.xlsx'
+dbms=xlsx replace;
+sheet='son1';
+getnames=yes;
+run;
+proc import out=dau1 datafile='N:\Stat Programming\Sim Project\names.xlsx'
+dbms=xlsx replace;
+sheet='dau1';
+getnames=yes;
+run;
+data son1;
+length Fhaircolor $5.;
+set son1;
+if Fhair1='ro' and Fhair0='ro' then Fhaircolor='Red';
+*if Fhaircolor='Red';
+run;
+data dau1;
+length Mhaircolor $5.;
+set dau1;
+if Mhair1='ro' and Mhair0='ro' then Mhaircolor='Red';
+*if Mhaircolor='Red';
+run;
+
+%macro dating(gender,k,l,seed=,ID=);
+proc freq data=&gender&k noprint; *counting sons and daughters;
+  tables &ID / out=freqres;
+run;
+data _null_;
+  set freqres;
+  obs=_n_;
+  call symput('count',obs);
+run;
+
+data assignment&gender&k; *assigning partner number;
+    array isAssigned[1:&count] _temporary_ (&count*0);
+    set &gender&k;
+    do while (1);
+      partnernum = ceil(&count*ranuni(&seed));
+      if isAssigned[partnernum] then continue;
+      isAssigned[partnernum] = 1;
+      leave;
+    end;
+  run;
+
+  proc sort data=assignment&gender&k;
+  by partnernum;
+  run;
+
+%mend;
+
+%macro marry(k=,l=);
+ data couple&k;
+ retain FSurname MSurname;
+ merge assignmentson&k assignmentdau&k;
+ by partnernum;
+ fam=cats("&k",'a',FID,'a',MID); 
+ if Ffam=Mfam or FFfam=MFfam or FFfam=MMfam or FMfam=MMfam or FMfam=MFfam then Inbreed='Yes'; else Inbreed = 'No';
+ run;
+%mend;
+
+%macro kids(k=,l=,birthrate=); *'k' is current generation, 'l' is next generation;
+data kids&k;
+set couple&k;
+
+	do FirstName = 1 to ceil(rand('POISSON',&birthrate)); *test 1 to 0; *Poisson for birthrate?;
+		KidSurname=FSurname;
+		MomSurname=MSurname;
+	output;
+	end;
+
+if Inbreed='Yes' then delete; *deletes inbreed;
+drop partnernum;
+
+run;
+
+data kids&k;
+retain FirstName;
+set kids&k;
+	/*Gender Assignment*/
+genderNum=rand('BINOMIAL',.5,1); *1 is female;
+if genderNum=1 then gender='dau'; else gender='son'; 
+	
+	/*Hair Assignemnt*/
+Mhairass=rand('BINOMIAL',.5,1);
+	if Mhairass=0 then hair1=Mhair1; else hair1=Mhair0;
+Fhairass=rand('BINOMIAL',.5,1);
+	if Fhairass=0 then hair0=Fhair1; else hair0=Fhair0;
+if hair0='no' or hair1 ='no' then haircolor='Black'; else
+if hair0='br' or hair1 ='br' then haircolor='Brown'; else
+if hair0='bl' or hair1='bl' then haircolor='Blonde'; else
+if hair0='ro' or hair1='ro' then haircolor = 'Red'; else
+if hair0='nl' and hair1='nl' then haircolor= 'Pink';
+label haircolor="Hair Color";
+
+	/*Sickle Assignment*/
+Fsickleass=rand('BINOMIAL',.5,1);
+	if Fsickleass=0 then sickle0=Fsickle0; else sickle0=Fsickle1;
+Msickleass=rand('BINOMIAL',.5,1);
+	if Msickleass=0 then sickle1=Msickle0; else sickle1=Msickle1;
+
+if sickle1=1 and sickle0=1 then sicklezygous='homo'; else 
+if sickle1=0 and sickle0=1 then sicklezygous='hete'; else
+if sickle1=1 and sickle0=0 then sicklezygous='hete'; else
+if sickle1=0 and sickle0=0 then sicklezygous='none';
+
+	/*    */
+drop genderNum Mhairass Fhairass Mhair0 Mhair1 Fhair0 Fhair1  Fsickle1 Fsickle0  Msickle1 Msickle0;
+
+if cmiss(of MSurname)>0 then delete; *removes single people;
+if cmiss(of FSurname)>0 then delete; *removes single people;
+if Inbreed='Yes' then delete; *deletes inbreed;
+retain ID;
+ID+1;
+run; 
+
+data dau&l;
+retain Firstname MSurname MomSurname MMit Ffirstname Mfirstname;
+set kids&k;
+if gender='dau';
+MSurname=KidSurname;
+Mhair0=hair0;
+Mhair1=hair1;
+Msickle0=sickle0;
+Msickle1=sickle1;
+Msicklezygous=sicklezygous;
+Mhaircolor=haircolor;
+MMfam=Mfam;
+MFfam=Ffam;
+Mfam=Fam;
+MID=ID;
+Msxl=(Fsxl+Msxl)/2;
+Drop gender FMit kidSurname FSurname Fam ID Ffam gender FMfam FFfam Fsxl hair0 hair1 haircolor Fhaircolor sickle0 sickle1 sicklezygous ;
+run;
+
+data son&l;
+retain Firstname FSurname MomSurname FMit Ffirstname Mfirstname;
+set kids&k;
+if gender='son';
+*FKidSurname=FSurname;
+Fhair0=hair0;
+Fhair1=hair1;
+Fhaircolor=haircolor;
+Fsickle0=sickle0;
+Fsickle1=sickle1;
+Fsicklezygous=sicklezygous;
+FMit=MMit;
+MSurname=MomSurname;
+FMfam=Mfam;
+FFfam=Ffam;
+Ffam=Fam;
+*drop FID;
+FID=ID;
+Fsxl=(Fsxl+Msxl)/2;
+drop MSurname MMit KidSurname fam ID MID Mfam gender MMfam MFfam Msxl hair0 hair1 haircolor Mhaircolor sickle0 sickle1 sicklezygous ;
+
+run;
+%mend kids;
+
+
+%macro sim(k=,s1=, s2= ,birthrate=);
+	%dating(gender=dau,k=&k,l=%eval(&k+1),seed=%eval(&k+&s1-1),ID=MID);
+	%dating(gender=son,k=&k,l=%eval(&k+1),seed=%eval(&k+&s2),ID=FID);
+	%marry(k=&k);
+	%kids(k=&k,l=%eval(&k+1),birthrate=&birthrate);
+%mend sim;
+
+%macro myfreq(gender=,k=,num=,var1=,var2=) ; 
+proc freq data=&gender&k noprint;
+Title "&k Generation &var1";
+tables &var1 &var2 / out=aa&k;
+run;
+
+proc sort data=aa&k;
+by Fsurname;
+run;
+data aa&k;
+set aa&k;
+rename COUNT=gen&k;
+run;
+%mend myfreq;
+ 
+/*Code Red Hair Sexual Selection:*/
+
+%macro kids(k=,l=,birthrate=); *'k' is current generation, 'l' is next generation;
+data kids&k;
+set couple&k;
+
+if Mhaircolor="Red" or Fhaircolor="Red" then 
+	do FirstName = 1 to ceil(rand('POISSON',1.25*&birthrate)); *test 1 to 0; *Poisson for birthrate?;
+		KidSurname=FSurname;
+		MomSurname=MSurname;
+	output;
+	end;
+
+else
+	do FirstName = 1 to ceil(rand('POISSON',&birthrate)); *test 1 to 0; *Poisson for birthrate?;
+		KidSurname=FSurname;
+		MomSurname=MSurname;
+	output;
+	end;
+
+if Inbreed='Yes' then delete; *deletes inbreed;
+drop partnernum;
+
+run;
+
+data kids&k;
+retain FirstName;
+set kids&k;
+	/*Gender Assignment*/
+genderNum=rand('BINOMIAL',.5,1); *1 is female;
+if genderNum=1 then gender='dau'; else gender='son'; 
+	
+	/*Hair Assignemnt*/
+Mhairass=rand('BINOMIAL',.5,1);
+	if Mhairass=0 then hair1=Mhair1; else hair1=Mhair0;
+Fhairass=rand('BINOMIAL',.5,1);
+	if Fhairass=0 then hair0=Fhair1; else hair0=Fhair0;
+if hair0='no' or hair1 ='no' then haircolor='Black'; else
+if hair0='br' or hair1 ='br' then haircolor='Brown'; else
+if hair0='bl' or hair1='bl' then haircolor='Blonde'; else
+if hair0='ro' and hair1='ro' then haircolor = 'Red'; else
+if hair0='nl' and hair1='nl' then haircolor= 'Pink';
+label haircolor="Hair Color";
+
+	/*Sickle Assignment*/
+Fsickleass=rand('BINOMIAL',.5,1);
+	if Fsickleass=0 then sickle0=Fsickle0; else sickle0=Fsickle1;
+Msickleass=rand('BINOMIAL',.5,1);
+	if Msickleass=0 then sickle1=Msickle0; else sickle1=Msickle1;
+
+if sickle1=1 and sickle0=1 then sicklezygous='homo'; else 
+if sickle1=0 and sickle0=1 then sicklezygous='hete'; else
+if sickle1=1 and sickle0=0 then sicklezygous='hete'; else
+if sickle1=0 and sickle0=0 then sicklezygous='none';
+
+	/*    */
+drop genderNum Mhairass Fhairass Mhair0 Mhair1 Fhair0 Fhair1  Fsickle1 Fsickle0  Msickle1 Msickle0;
+
+if cmiss(of MSurname)>0 then delete; *removes single people;
+if cmiss(of FSurname)>0 then delete; *removes single people;
+if Inbreed='Yes' then delete; *deletes inbreed;
+retain ID;
+ID+1;
+run; 
+
+data dau&l;
+retain Firstname MSurname MomSurname MMit Ffirstname Mfirstname;
+set kids&k;
+if gender='dau';
+MSurname=KidSurname;
+Mhair0=hair0;
+Mhair1=hair1;
+Msickle0=sickle0;
+Msickle1=sickle1;
+Msicklezygous=sicklezygous;
+Mhaircolor=haircolor;
+MMfam=Mfam;
+MFfam=Ffam;
+Mfam=Fam;
+MID=ID;
+Msxl=(Fsxl+Msxl)/2;
+Drop gender FMit kidSurname FSurname Fam ID Ffam gender FMfam FFfam Fsxl hair0 hair1 haircolor Fhaircolor sickle0 sickle1 sicklezygous ;
+run;
+
+data son&l;
+retain Firstname FSurname MomSurname FMit Ffirstname Mfirstname;
+set kids&k;
+if gender='son';
+*FKidSurname=FSurname;
+Fhair0=hair0;
+Fhair1=hair1;
+Fhaircolor=haircolor;
+Fsickle0=sickle0;
+Fsickle1=sickle1;
+Fsicklezygous=sicklezygous;
+FMit=MMit;
+MSurname=MomSurname;
+FMfam=Mfam;
+FFfam=Ffam;
+Ffam=Fam;
+*drop FID;
+FID=ID;
+Fsxl=(Fsxl+Msxl)/2;
+drop MSurname MMit KidSurname fam ID MID Mfam gender MMfam MFfam Msxl hair0 hair1 haircolor Mhaircolor sickle0 sickle1 sicklezygous ;
+
+run;
+%mend kids;
+
+
+%sim(k=1,s1=88,s2=165,birthrate=3);
+%sim(k=2,s1=150,s2=11,birthrate=3);
+%sim(k=3,s1=7,s2=79,birthrate=3);
+%sim(k=4,s1=2,s2=15,birthrate=3);
+%sim(k=5,s1=1,s2=1,birthrate=3);
+%sim(k=6,s1=1,s2=1,birthrate=3);
+%sim(k=7,s1=21,s2=5,birthrate=3);
+%sim(k=8,s1=1,s2=1,birthrate=3);
+%sim(k=9,s1=5,s2=1,birthrate=3);
+%sim(k=10,s1=1,s2=1,birthrate=3);
+%sim(k=11,s1=1,s2=1,birthrate=3);
+%sim(k=12,s1=1,s2=11,birthrate=3);
+%sim(k=13,s1=1,s2=1,birthrate=3);
+%sim(k=14,s1=1,s2=1,birthrate=3);
+%sim(k=15,s1=1,s2=1,birthrate=3);
+%sim(k=16,s1=1,s2=1,birthrate=3);
+%sim(k=17,s1=1,s2=1,birthrate=3);
+%sim(k=18,s1=2,s2=1,birthrate=3);
+%sim(k=19,s1=1,s2=1,birthrate=3);
+%sim(k=20,s1=451,s2=100,birthrate=3);
+%sim(k=21,s1=1,s2=1,birthrate=3);
+%sim(k=22,s1=1,s2=1,birthrate=3);
+%sim(k=23,s1=1,s2=99,birthrate=3);
+ 
+/*Sickle Cell Code:*/
+
+%macro kids(k=,l=,birthrate=); *'k' is current generation, 'l' is next generation;
+data kids&k;
+set couple&k;
+
+	do FirstName = 1 to ceil(rand('POISSON',&birthrate)); *test 1 to 0; *Poisson for birthrate?;
+		KidSurname=FSurname;
+		MomSurname=MSurname;
+	output;
+	end;
+
+if Inbreed='Yes' then delete; *deletes inbreed;
+drop partnernum;
+
+run;
+
+data kids&k;
+retain FirstName;
+set kids&k;
+		/*Sickle Assignment*/
+Fsickleass=rand('BINOMIAL',.5,1);
+	if Fsickleass=0 then sickle0=Fsickle0; else sickle0=Fsickle1;
+Msickleass=rand('BINOMIAL',.5,1);
+	if Msickleass=0 then sickle1=Msickle0; else sickle1=Msickle1;
+
+if sickle1=1 and sickle0=1 then sicklezygous='homo'; else 
+if sickle1=0 and sickle0=1 then sicklezygous='hete'; else
+if sickle1=1 and sickle0=0 then sicklezygous='hete'; else
+if sickle1=0 and sickle0=0 then sicklezygous='none';
+
+if sicklezygous='homo' then delete;
+/*Gender Assignment*/
+genderNum=rand('BINOMIAL',.5,1); *1 is female;
+if genderNum=1 then gender='dau'; else gender='son'; 
+	
+	/*Hair Assignemnt*/
+Mhairass=rand('BINOMIAL',.5,1);
+	if Mhairass=0 then hair1=Mhair1; else hair1=Mhair0;
+Fhairass=rand('BINOMIAL',.5,1);
+	if Fhairass=0 then hair0=Fhair1; else hair0=Fhair0;
+if hair0='no' or hair1 ='no' then haircolor='Black'; else
+if hair0='br' or hair1 ='br' then haircolor='Brown'; else
+if hair0='bl' or hair1='bl' then haircolor='Blonde'; else
+if hair0='ro' and hair1='ro' then haircolor = 'Red'; else
+if hair0='nl' and hair1='nl' then haircolor= 'Pink';
+label haircolor="Hair Color";
+
+
+	/*    */
+drop genderNum Mhairass Fhairass Mhair0 Mhair1 Fhair0 Fhair1  Fsickle1 Fsickle0  Msickle1 Msickle0;
+
+if cmiss(of MSurname)>0 then delete; *removes single people;
+if cmiss(of FSurname)>0 then delete; *removes single people;
+if Inbreed='Yes' then delete; *deletes inbreed;
+retain ID;
+ID+1;
+run; 
+
+data dau&l;
+retain Firstname MSurname MomSurname MMit Ffirstname Mfirstname;
+set kids&k;
+if gender='dau';
+MSurname=KidSurname;
+Mhair0=hair0;
+Mhair1=hair1;
+Msickle0=sickle0;
+Msickle1=sickle1;
+Msicklezygous=sicklezygous;
+Mhaircolor=haircolor;
+MMfam=Mfam;
+MFfam=Ffam;
+Mfam=Fam;
+MID=ID;
+Msxl=(Fsxl+Msxl)/2;
+Drop gender FMit kidSurname FSurname Fam ID Ffam gender FMfam FFfam Fsxl hair0 hair1 haircolor Fhaircolor sickle0 sickle1 sicklezygous ;
+run;
+
+data son&l;
+retain Firstname FSurname MomSurname FMit Ffirstname Mfirstname;
+set kids&k;
+if gender='son';
+*FKidSurname=FSurname;
+Fhair0=hair0;
+Fhair1=hair1;
+Fhaircolor=haircolor;
+Fsickle0=sickle0;
+Fsickle1=sickle1;
+Fsicklezygous=sicklezygous;
+FMit=MMit;
+MSurname=MomSurname;
+FMfam=Mfam;
+FFfam=Ffam;
+Ffam=Fam;
+*drop FID;
+FID=ID;
+Fsxl=(Fsxl+Msxl)/2;
+drop MSurname MMit KidSurname fam ID MID Mfam gender MMfam MFfam Msxl hair0 hair1 haircolor Mhaircolor sickle0 sickle1 sicklezygous ;
+
+run;
+%mend kids;
+
+
+%sim(k=1,s1=238,s2=165,birthrate=3);
+%sim(k=2,s1=15,s2=11,birthrate=3);
+%sim(k=3,s1=7,s2=79,birthrate=3);
+%sim(k=4,s1=2,s2=15,birthrate=3);
+%sim(k=5,s1=1,s2=1,birthrate=3);
+%sim(k=6,s1=4,s2=1,birthrate=3);
+%sim(k=7,s1=21,s2=5,birthrate=3);
+%sim(k=8,s1=1,s2=1,birthrate=3);
+%sim(k=9,s1=5,s2=1,birthrate=3);
+%sim(k=10,s1=97,s2=1,birthrate=3);
+%sim(k=11,s1=1,s2=1,birthrate=3);
+%sim(k=12,s1=1,s2=11,birthrate=3);
+%sim(k=13,s1=1,s2=1,birthrate=3);
+%sim(k=14,s1=1,s2=1,birthrate=3);
+%sim(k=15,s1=1,s2=1,birthrate=3);
+%sim(k=16,s1=1,s2=1,birthrate=3);
+%sim(k=17,s1=1,s2=1,birthrate=3);
+%sim(k=18,s1=2,s2=1,birthrate=3);
+%sim(k=19,s1=1,s2=1,birthrate=3);
+%sim(k=20,s1=451,s2=190,birthrate=3);
+%sim(k=21,s1=1,s2=1,birthrate=3);
+%sim(k=22,s1=1,s2=1,birthrate=3);
+%sim(k=23,s1=1,s2=99,birthrate=3);
+
+proc freq data=son24 ; *counting sons and daughters;
+  tables Fsurname / out=aa;
+  title 'Generation 24 Son Surname';
+run;
+proc freq data=dau24 ; *counting sons and daughters;
+  tables Mmit / out=aaa;
+  title 'Generation 24 Daughter Mitochonria';
+run;
+proc freq data=kids23 ; *counting sons and daughters;
+  tables haircolor hair0 hair1 / out=aaahair;
+  title 'Generation 23 Hair Color and Allele Count';
+run;
+proc freq data=kids1 ; *counting sons and daughters;
+  tables sicklezygous / out=aaahair;
+  title 'Generation 1 Sickle Cell Anemia and Allele Count';
+run;
+
+%macro export(k=, gender=, var=);
+proc freq data=&gender&k noprint; *counting sons and daughters;
+  tables &var / out=aa&k;
+run;
+
+data aa&k;
+set aa&k;
+rename Percent=Gen&k;
+drop Count;
+run;
+%mend export;
+%export(K=1,gender=kids, var=sicklezygous);
+ %export(K=2,gender=kids, var=sicklezygous);
+ %export(K=3,gender=kids, var=sicklezygous);
+ %export(K=4,gender=kids, var=sicklezygous);
+ %export(K=5,gender=kids, var=sicklezygous);
+ %export(K=6,gender=kids, var=sicklezygous);
+ %export(K=7,gender=kids, var=sicklezygous);
+ %export(K=8,gender=kids, var=sicklezygous);
+ %export(K=9,gender=kids, var=sicklezygous);
+ %export(K=10,gender=kids, var=sicklezygous);
+ %export(K=11,gender=kids, var=sicklezygous);
+ %export(K=12,gender=kids, var=sicklezygous);
+ %export(K=13,gender=kids, var=sicklezygous);
+ %export(K=14,gender=kids, var=sicklezygous);
+ %export(K=15,gender=kids, var=sicklezygous);
+ %export(K=16,gender=kids, var=sicklezygous);
+ %export(K=17,gender=kids, var=sicklezygous);
+ %export(K=18,gender=kids, var=sicklezygous);
+ %export(K=19,gender=kids, var=sicklezygous);
+ %export(K=20,gender=kids, var=sicklezygous);
+ %export(K=21,gender=kids, var=sicklezygous);
+ %export(K=22,gender=kids, var=sicklezygous);
+ %export(K=23,gender=kids, var=sicklezygous);
+
+
+
+data aamerge;
+merge aa1	aa2	aa3	aa4	aa5	aa6	aa7	aa8	aa9	aa10	aa11	aa12	aa13	aa14	aa15	aa16	aa17	aa18	aa19	aa20	aa21	aa22	aa23;
+by sicklezygous;
+run;
+
+proc export 
+  data=aamerge
+  dbms=xlsx 
+  outfile="N:\Stat Programming\Sim Project\papersimsickle4.xlsx" 
+  replace;
+run;

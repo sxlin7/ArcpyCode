@@ -1,4 +1,4 @@
- Valve Placement Python Code
+Valve Placement Python Code
 The purpose of this project is to place valve symbols based on distance from curb line.  
 ### Summary of Code
 * Join Service feature with valve distance table by service number ID, keeping only matching rows
